@@ -1,0 +1,30 @@
+import type { PlatformAccessory } from 'homebridge';
+import type { AmaranLightsPlatform } from './platform';
+import type { AmaranTransport } from './transports/transport';
+import type { LightConfig } from './types';
+export declare class AmaranLightAccessory {
+    private readonly platform;
+    private readonly accessory;
+    private readonly config;
+    private readonly transport;
+    private readonly capabilities;
+    private readonly service;
+    private state;
+    constructor(platform: AmaranLightsPlatform, accessory: PlatformAccessory, config: LightConfig, transport: AmaranTransport);
+    private configureCharacteristics;
+    private getOn;
+    private setOn;
+    private getBrightness;
+    private setBrightness;
+    private getColorTemperature;
+    private setColorTemperature;
+    private getHue;
+    private setHue;
+    private getSaturation;
+    private setSaturation;
+    private refreshState;
+    private applyState;
+    private updateState;
+    private updateHomeKitCharacteristics;
+    private initialState;
+}

@@ -1,0 +1,43 @@
+{
+  "name": "homebridge-amaran-lights",
+  "version": "0.1.0",
+  "description": "Homebridge plugin for controlling amaran Ray 120c and Verge Max lights.",
+  "keywords": [
+    "homebridge-plugin",
+    "homebridge",
+    "amaran",
+    "aputure",
+    "sidus-link",
+    "lighting"
+  ],
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "config.schema.json",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20.0.0",
+    "homebridge": ">=1.8.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "clean": "rm -rf dist",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "homebridge": "^1.8.5",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "@types/ws": "^8.5.12",
+    "typescript": "^5.8.3"
+  },
+  "peerDependencies": {
+    "homebridge": ">=1.8.0"
+  }
+}

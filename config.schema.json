@@ -1,0 +1,187 @@
+{
+  "pluginAlias": "AmaranLightsPlatform",
+  "pluginType": "platform",
+  "singular": true,
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "title": "Name",
+        "type": "string",
+        "default": "Amaran Lights"
+      },
+      "transport": {
+        "title": "Transport",
+        "type": "object",
+        "oneOf": [
+          {
+            "title": "Mock",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "mock"
+                ],
+                "default": "mock"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "title": "amaran Desktop API",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "amaran-desktop"
+                ],
+                "default": "amaran-desktop"
+              },
+              "webSocketUrl": {
+                "title": "WebSocket URL",
+                "type": "string",
+                "format": "uri",
+                "default": "ws://127.0.0.1:12345",
+                "placeholder": "ws://127.0.0.1:12345"
+              },
+              "apiSecretKey": {
+                "title": "API Secret Key",
+                "type": "string"
+              },
+              "apiSecretKeyEnv": {
+                "title": "API Secret Key Environment Variable",
+                "type": "string",
+                "default": "AMARAN_API_SECRET_KEY"
+              },
+              "clientId": {
+                "title": "Client ID",
+                "type": "integer",
+                "default": 1,
+                "minimum": 1
+              },
+              "requestTimeoutMs": {
+                "title": "Request Timeout",
+                "type": "integer",
+                "default": 5000,
+                "minimum": 500,
+                "maximum": 30000
+              },
+              "debounceMs": {
+                "title": "Command Debounce",
+                "type": "integer",
+                "default": 220,
+                "minimum": 0,
+                "maximum": 1000
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "title": "HTTP Bridge",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "http"
+                ],
+                "default": "http"
+              },
+              "baseUrl": {
+                "title": "Base URL",
+                "type": "string",
+                "format": "uri",
+                "placeholder": "http://127.0.0.1:33412/"
+              },
+              "token": {
+                "title": "Bearer Token",
+                "type": "string"
+              },
+              "timeoutMs": {
+                "title": "Timeout",
+                "type": "integer",
+                "default": 5000,
+                "minimum": 500,
+                "maximum": 30000
+              }
+            },
+            "required": [
+              "type",
+              "baseUrl"
+            ]
+          }
+        ],
+        "default": {
+          "type": "amaran-desktop",
+          "webSocketUrl": "ws://127.0.0.1:12345",
+          "apiSecretKeyEnv": "AMARAN_API_SECRET_KEY"
+        }
+      },
+      "lights": {
+        "title": "Lights",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "title": "Light ID",
+              "type": "string",
+              "required": true
+            },
+            "name": {
+              "title": "Name",
+              "type": "string",
+              "required": true
+            },
+            "model": {
+              "title": "Model",
+              "type": "string",
+              "oneOf": [
+                {
+                  "title": "amaran Ray 120c",
+                  "enum": [
+                    "ray-120c"
+                  ]
+                },
+                {
+                  "title": "amaran Verge Max",
+                  "enum": [
+                    "verge-max"
+                  ]
+                }
+              ],
+              "required": true
+            },
+            "serialNumber": {
+              "title": "Serial Number",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "model"
+          ]
+        },
+        "default": [
+          {
+            "id": "ray-120c",
+            "name": "Ray 120c",
+            "model": "ray-120c"
+          },
+          {
+            "id": "verge-max",
+            "name": "Verge Max",
+            "model": "verge-max"
+          }
+        ]
+      }
+    },
+    "required": [
+      "lights"
+    ]
+  }
+}

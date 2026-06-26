@@ -1,0 +1,33 @@
+import type { Logger } from 'homebridge';
+import type { AmaranDesktopTransportConfig, LightCommand, LightState } from '../types';
+import type { AmaranTransport } from './transport';
+export declare class DesktopApiTransport implements AmaranTransport {
+    private readonly log;
+    private readonly apiSecretKey?;
+    private readonly clientId;
+    private readonly debounceMs;
+    private readonly pendingRequests;
+    private readonly requestTimeoutMs;
+    private readonly stateCache;
+    private readonly updateQueue;
+    private readonly webSocketUrl;
+    private connecting?;
+    private requestId;
+    private socket?;
+    constructor(config: AmaranDesktopTransportConfig, log: Logger);
+    getState(id: string): Promise<LightState>;
+    setState(id: string, command: LightCommand): Promise<LightState>;
+    private flushQueuedCommand;
+    private applyState;
+    private sendRequest;
+    private getSocket;
+    private openSocket;
+    private handleClose;
+    private handleMessage;
+    private handleResponse;
+    private handleEvent;
+    private rejectPendingRequests;
+    private createToken;
+    private nextRequestId;
+    private mergeState;
+}
