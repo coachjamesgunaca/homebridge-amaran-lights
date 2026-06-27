@@ -74,6 +74,16 @@
                 "default": 220,
                 "minimum": 0,
                 "maximum": 1000
+              },
+              "diagnostics": {
+                "title": "Log Desktop API Device Diagnostics",
+                "type": "boolean",
+                "default": true
+              },
+              "debug": {
+                "title": "Verbose Desktop API Logging",
+                "type": "boolean",
+                "default": false
               }
             },
             "required": [

@@ -5,13 +5,16 @@ export declare class DesktopApiTransport implements AmaranTransport {
     private readonly log;
     private readonly apiSecretKey?;
     private readonly clientId;
+    private readonly debug;
     private readonly debounceMs;
+    private readonly diagnostics;
     private readonly pendingRequests;
     private readonly requestTimeoutMs;
     private readonly stateCache;
     private readonly updateQueue;
     private readonly webSocketUrl;
     private connecting?;
+    private diagnosticsStarted;
     private requestId;
     private socket?;
     constructor(config: AmaranDesktopTransportConfig, log: Logger);
@@ -26,8 +29,12 @@ export declare class DesktopApiTransport implements AmaranTransport {
     private handleMessage;
     private handleResponse;
     private handleEvent;
+    private startDiagnostics;
+    private runDiagnostics;
     private rejectPendingRequests;
     private createToken;
     private nextRequestId;
     private mergeState;
+    private describePendingRequests;
+    private debugLog;
 }

@@ -27,6 +27,8 @@ export interface AmaranDesktopTransportConfig {
     readonly clientId?: number;
     readonly requestTimeoutMs?: number;
     readonly debounceMs?: number;
+    readonly debug?: boolean;
+    readonly diagnostics?: boolean;
 }
 export interface MockTransportConfig {
     readonly type: 'mock';

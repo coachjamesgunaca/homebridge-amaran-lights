@@ -41,7 +41,9 @@ Desktop API mode points Homebridge at the amaran desktop service:
     "apiSecretKeyEnv": "AMARAN_API_SECRET_KEY",
     "clientId": 1,
     "requestTimeoutMs": 5000,
-    "debounceMs": 220
+    "debounceMs": 220,
+    "diagnostics": true,
+    "debug": false
   },
   "lights": [
     {
@@ -95,6 +97,8 @@ Mock mode lets you check that both lights appear in Apple Home:
 ## Desktop API mapping
 
 The `amaran-desktop` transport connects to the local amaran Desktop WebSocket server. The documented default is `ws://127.0.0.1:12345`.
+
+Set `debug` to `true` while testing. The plugin will log redacted request/response frames, WebSocket connection state, timeouts, and startup `get_fixture_list` / `get_device_list` diagnostics so you can confirm the correct `node_id` values.
 
 Every request includes:
 

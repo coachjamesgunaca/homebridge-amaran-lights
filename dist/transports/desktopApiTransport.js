@@ -11,17 +11,21 @@ const DEFAULT_API_SECRET_KEY_ENV = 'AMARAN_API_SECRET_KEY';
 const DEFAULT_CLIENT_ID = 1;
 const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
 const DEFAULT_DEBOUNCE_MS = 220;
+const DEFAULT_DIAGNOSTICS = true;
 class DesktopApiTransport {
     log;
     apiSecretKey;
     clientId;
+    debug;
     debounceMs;
+    diagnostics;
     pendingRequests = new Map();
     requestTimeoutMs;
     stateCache = new Map();
     updateQueue = new Map();
     webSocketUrl;
     connecting;
+    diagnosticsStarted = false;
     requestId = 1;
     socket;
     constructor(config, log) {
@@ -31,8 +35,13 @@ class DesktopApiTransport {
         this.clientId = config.clientId ?? DEFAULT_CLIENT_ID;
         this.requestTimeoutMs = config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
         this.debounceMs = config.debounceMs ?? DEFAULT_DEBOUNCE_MS;
+        this.debug = config.debug ?? false;
+        this.diagnostics = config.diagnostics ?? DEFAULT_DIAGNOSTICS;
+        this.log.info('amaran Desktop API transport configured for %s with client_id=%s, timeout=%sms, diagnostics=%s, debug=%s.', this.webSocketUrl, this.clientId, this.requestTimeoutMs, this.diagnostics, this.debug);
+        this.startDiagnostics();
     }
     async getState(id) {
+        this.debugLog('amaran Desktop API reading state for node_id=%s.', id);
         const [sleep, intensity, cct, hsi] = await Promise.allSettled([
             this.sendRequest('get_sleep', id),
             this.sendRequest('get_intensity', id),
@@ -160,13 +169,18 @@ class DesktopApiTransport {
         if (args) {
             payload.args = args;
         }
+        this.debugLog('amaran Desktop API send request_id=%s action=%s node_id=%s args=%s socket=%s.', requestId, action, nodeId ?? '(none)', compactJson(args ?? {}), describeReadyState(socket.readyState));
         return await new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 this.pendingRequests.delete(requestId);
-                reject(new Error(`amaran Desktop API ${action} timed out after ${this.requestTimeoutMs}ms`));
+                const message = `amaran Desktop API ${action} timed out after ${this.requestTimeoutMs}ms`
+                    + ` (request_id=${requestId}, node_id=${nodeId ?? '(none)'}, socket=${describeReadyState(socket.readyState)}, pending=${this.describePendingRequests()})`;
+                this.log.warn(message);
+                reject(new Error(message));
             }, this.requestTimeoutMs);
             this.pendingRequests.set(requestId, {
                 action,
+                nodeId,
                 reject,
                 resolve,
                 timeout,
@@ -206,6 +220,7 @@ class DesktopApiTransport {
     }
     async openSocket() {
         return await new Promise((resolve, reject) => {
+            this.log.info('Connecting to amaran Desktop API WebSocket at %s.', this.webSocketUrl);
             const socket = new ws_1.default(this.webSocketUrl);
             let timeout;
             const cleanup = () => {
@@ -219,6 +234,8 @@ class DesktopApiTransport {
                 socket.on('close', (code, reason) => this.handleClose(socket, code, reason));
                 socket.on('error', (error) => this.log.warn('amaran Desktop API WebSocket error: %s', formatError(error)));
                 socket.on('message', (data) => this.handleMessage(data));
+                this.log.info('Connected to amaran Desktop API WebSocket at %s.', this.webSocketUrl);
+                this.startDiagnostics();
                 resolve(socket);
             };
             const onOpenError = (error) => {
@@ -239,12 +256,15 @@ class DesktopApiTransport {
             this.socket = undefined;
         }
         const message = reason.length > 0 ? reason.toString('utf8') : `code ${code}`;
+        this.log.warn('amaran Desktop API WebSocket closed: %s.', message);
         this.rejectPendingRequests(new Error(`amaran Desktop API WebSocket closed: ${message}`));
     }
     handleMessage(data) {
+        const raw = rawDataToString(data);
+        this.debugLog('amaran Desktop API received message: %s', redactToken(raw));
         let message;
         try {
-            message = JSON.parse(rawDataToString(data));
+            message = JSON.parse(raw);
         }
         catch (error) {
             this.log.debug('Ignoring non-JSON amaran Desktop API message: %s', formatError(error));
@@ -275,6 +295,7 @@ class DesktopApiTransport {
         this.pendingRequests.delete(response.request_id);
         clearTimeout(pending.timeout);
         const code = typeof response.code === 'number' ? response.code : 0;
+        this.debugLog('amaran Desktop API response request_id=%s action=%s code=%s message=%s data=%s.', response.request_id, pending.action, code, readMessage(response.message), compactJson(response.data));
         if (code !== 0) {
             pending.reject(new Error(`amaran Desktop API ${pending.action} failed with code ${code}: ${readMessage(response.message)}`));
             return;
@@ -287,7 +308,28 @@ class DesktopApiTransport {
         }
         const state = normalizeEventState(event.event, event.data);
         if (Object.keys(state).length > 0) {
+            this.debugLog('amaran Desktop API event=%s node_id=%s data=%s normalized=%s.', event.event, event.node_id, compactJson(event.data), compactJson(state));
             this.mergeState(event.node_id, state);
+        }
+    }
+    startDiagnostics() {
+        if (!this.diagnostics || this.diagnosticsStarted) {
+            return;
+        }
+        this.diagnosticsStarted = true;
+        setTimeout(() => {
+            void this.runDiagnostics();
+        }, 250);
+    }
+    async runDiagnostics() {
+        for (const action of ['get_fixture_list', 'get_device_list']) {
+            try {
+                const data = await this.sendRequest(action);
+                this.log.info('amaran Desktop API diagnostic %s returned: %s', action, compactJson(data, 2000));
+            }
+            catch (error) {
+                this.log.warn('amaran Desktop API diagnostic %s failed: %s', action, formatError(error));
+            }
         }
     }
     rejectPendingRequests(error) {
@@ -324,6 +366,21 @@ class DesktopApiTransport {
         });
         this.stateCache.set(id, nextState);
         return nextState;
+    }
+    describePendingRequests() {
+        if (this.pendingRequests.size === 0) {
+            return 'none';
+        }
+        return [...this.pendingRequests.entries()]
+            .map(([requestId, pending]) => `${requestId}:${pending.action}:${pending.nodeId ?? '(none)'}`)
+            .join(',');
+    }
+    debugLog(message, ...parameters) {
+        if (this.debug) {
+            this.log.info(message, ...parameters);
+            return;
+        }
+        this.log.debug(message, ...parameters);
     }
 }
 exports.DesktopApiTransport = DesktopApiTransport;
@@ -465,6 +522,31 @@ function rawDataToString(data) {
         return Buffer.from(data).toString('utf8');
     }
     return Buffer.concat(data).toString('utf8');
+}
+function describeReadyState(readyState) {
+    switch (readyState) {
+        case ws_1.default.CONNECTING:
+            return 'CONNECTING';
+        case ws_1.default.OPEN:
+            return 'OPEN';
+        case ws_1.default.CLOSING:
+            return 'CLOSING';
+        case ws_1.default.CLOSED:
+            return 'CLOSED';
+        default:
+            return `UNKNOWN(${readyState})`;
+    }
+}
+function compactJson(value, maxLength = 800) {
+    const json = JSON.stringify(value);
+    const text = json === undefined ? String(value) : json;
+    if (text.length <= maxLength) {
+        return text;
+    }
+    return `${text.slice(0, maxLength)}...`;
+}
+function redactToken(text) {
+    return text.replace(/"token"\s*:\s*"[^"]+"/g, '"token":"[redacted]"');
 }
 function readMessage(message) {
     return typeof message === 'string' && message.length > 0 ? message : 'unknown error';

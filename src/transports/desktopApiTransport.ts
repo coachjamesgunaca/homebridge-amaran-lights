@@ -12,12 +12,14 @@ const DEFAULT_API_SECRET_KEY_ENV = 'AMARAN_API_SECRET_KEY';
 const DEFAULT_CLIENT_ID = 1;
 const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
 const DEFAULT_DEBOUNCE_MS = 220;
+const DEFAULT_DIAGNOSTICS = true;
 
 type JsonObject = Record<string, unknown>;
 type MutableLightState = { -readonly [Key in keyof LightState]: LightState[Key] };
 
 interface PendingRequest {
   readonly action: string;
+  readonly nodeId?: string;
   readonly reject: (error: Error) => void;
   readonly resolve: (data: unknown) => void;
   readonly timeout: ReturnType<typeof setTimeout>;
@@ -51,13 +53,16 @@ interface ApiEvent {
 export class DesktopApiTransport implements AmaranTransport {
   private readonly apiSecretKey?: string;
   private readonly clientId: number;
+  private readonly debug: boolean;
   private readonly debounceMs: number;
+  private readonly diagnostics: boolean;
   private readonly pendingRequests = new Map<number, PendingRequest>();
   private readonly requestTimeoutMs: number;
   private readonly stateCache = new Map<string, LightState>();
   private readonly updateQueue = new Map<string, QueuedCommand>();
   private readonly webSocketUrl: string;
   private connecting?: Promise<WebSocket>;
+  private diagnosticsStarted = false;
   private requestId = 1;
   private socket?: WebSocket;
 
@@ -70,9 +75,24 @@ export class DesktopApiTransport implements AmaranTransport {
     this.clientId = config.clientId ?? DEFAULT_CLIENT_ID;
     this.requestTimeoutMs = config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.debounceMs = config.debounceMs ?? DEFAULT_DEBOUNCE_MS;
+    this.debug = config.debug ?? false;
+    this.diagnostics = config.diagnostics ?? DEFAULT_DIAGNOSTICS;
+
+    this.log.info(
+      'amaran Desktop API transport configured for %s with client_id=%s, timeout=%sms, diagnostics=%s, debug=%s.',
+      this.webSocketUrl,
+      this.clientId,
+      this.requestTimeoutMs,
+      this.diagnostics,
+      this.debug,
+    );
+
+    this.startDiagnostics();
   }
 
   async getState(id: string): Promise<LightState> {
+    this.debugLog('amaran Desktop API reading state for node_id=%s.', id);
+
     const [sleep, intensity, cct, hsi] = await Promise.allSettled([
       this.sendRequest('get_sleep', id),
       this.sendRequest('get_intensity', id),
@@ -223,14 +243,27 @@ export class DesktopApiTransport implements AmaranTransport {
       payload.args = args;
     }
 
+    this.debugLog(
+      'amaran Desktop API send request_id=%s action=%s node_id=%s args=%s socket=%s.',
+      requestId,
+      action,
+      nodeId ?? '(none)',
+      compactJson(args ?? {}),
+      describeReadyState(socket.readyState),
+    );
+
     return await new Promise<unknown>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(requestId);
-        reject(new Error(`amaran Desktop API ${action} timed out after ${this.requestTimeoutMs}ms`));
+        const message = `amaran Desktop API ${action} timed out after ${this.requestTimeoutMs}ms`
+          + ` (request_id=${requestId}, node_id=${nodeId ?? '(none)'}, socket=${describeReadyState(socket.readyState)}, pending=${this.describePendingRequests()})`;
+        this.log.warn(message);
+        reject(new Error(message));
       }, this.requestTimeoutMs);
 
       this.pendingRequests.set(requestId, {
         action,
+        nodeId,
         reject,
         resolve,
         timeout,
@@ -276,6 +309,7 @@ export class DesktopApiTransport implements AmaranTransport {
 
   private async openSocket(): Promise<WebSocket> {
     return await new Promise<WebSocket>((resolve, reject) => {
+      this.log.info('Connecting to amaran Desktop API WebSocket at %s.', this.webSocketUrl);
       const socket = new WebSocket(this.webSocketUrl);
       let timeout: ReturnType<typeof setTimeout>;
       const cleanup = (): void => {
@@ -290,6 +324,8 @@ export class DesktopApiTransport implements AmaranTransport {
         socket.on('close', (code, reason) => this.handleClose(socket, code, reason));
         socket.on('error', (error) => this.log.warn('amaran Desktop API WebSocket error: %s', formatError(error)));
         socket.on('message', (data) => this.handleMessage(data));
+        this.log.info('Connected to amaran Desktop API WebSocket at %s.', this.webSocketUrl);
+        this.startDiagnostics();
         resolve(socket);
       };
 
@@ -314,14 +350,18 @@ export class DesktopApiTransport implements AmaranTransport {
     }
 
     const message = reason.length > 0 ? reason.toString('utf8') : `code ${code}`;
+    this.log.warn('amaran Desktop API WebSocket closed: %s.', message);
     this.rejectPendingRequests(new Error(`amaran Desktop API WebSocket closed: ${message}`));
   }
 
   private handleMessage(data: RawData): void {
+    const raw = rawDataToString(data);
+    this.debugLog('amaran Desktop API received message: %s', redactToken(raw));
+
     let message: unknown;
 
     try {
-      message = JSON.parse(rawDataToString(data));
+      message = JSON.parse(raw);
     } catch (error) {
       this.log.debug('Ignoring non-JSON amaran Desktop API message: %s', formatError(error));
       return;
@@ -359,6 +399,14 @@ export class DesktopApiTransport implements AmaranTransport {
     clearTimeout(pending.timeout);
 
     const code = typeof response.code === 'number' ? response.code : 0;
+    this.debugLog(
+      'amaran Desktop API response request_id=%s action=%s code=%s message=%s data=%s.',
+      response.request_id,
+      pending.action,
+      code,
+      readMessage(response.message),
+      compactJson(response.data),
+    );
 
     if (code !== 0) {
       pending.reject(new Error(`amaran Desktop API ${pending.action} failed with code ${code}: ${readMessage(response.message)}`));
@@ -376,7 +424,36 @@ export class DesktopApiTransport implements AmaranTransport {
     const state = normalizeEventState(event.event, event.data);
 
     if (Object.keys(state).length > 0) {
+      this.debugLog(
+        'amaran Desktop API event=%s node_id=%s data=%s normalized=%s.',
+        event.event,
+        event.node_id,
+        compactJson(event.data),
+        compactJson(state),
+      );
       this.mergeState(event.node_id, state);
+    }
+  }
+
+  private startDiagnostics(): void {
+    if (!this.diagnostics || this.diagnosticsStarted) {
+      return;
+    }
+
+    this.diagnosticsStarted = true;
+    setTimeout(() => {
+      void this.runDiagnostics();
+    }, 250);
+  }
+
+  private async runDiagnostics(): Promise<void> {
+    for (const action of ['get_fixture_list', 'get_device_list']) {
+      try {
+        const data = await this.sendRequest(action);
+        this.log.info('amaran Desktop API diagnostic %s returned: %s', action, compactJson(data, 2000));
+      } catch (error) {
+        this.log.warn('amaran Desktop API diagnostic %s failed: %s', action, formatError(error));
+      }
     }
   }
 
@@ -423,6 +500,25 @@ export class DesktopApiTransport implements AmaranTransport {
 
     this.stateCache.set(id, nextState);
     return nextState;
+  }
+
+  private describePendingRequests(): string {
+    if (this.pendingRequests.size === 0) {
+      return 'none';
+    }
+
+    return [...this.pendingRequests.entries()]
+      .map(([requestId, pending]) => `${requestId}:${pending.action}:${pending.nodeId ?? '(none)'}`)
+      .join(',');
+  }
+
+  private debugLog(message: string, ...parameters: unknown[]): void {
+    if (this.debug) {
+      this.log.info(message, ...parameters);
+      return;
+    }
+
+    this.log.debug(message, ...parameters);
   }
 }
 
@@ -611,6 +707,36 @@ function rawDataToString(data: RawData): string {
   }
 
   return Buffer.concat(data).toString('utf8');
+}
+
+function describeReadyState(readyState: number): string {
+  switch (readyState) {
+    case WebSocket.CONNECTING:
+      return 'CONNECTING';
+    case WebSocket.OPEN:
+      return 'OPEN';
+    case WebSocket.CLOSING:
+      return 'CLOSING';
+    case WebSocket.CLOSED:
+      return 'CLOSED';
+    default:
+      return `UNKNOWN(${readyState})`;
+  }
+}
+
+function compactJson(value: unknown, maxLength = 800): string {
+  const json = JSON.stringify(value);
+  const text = json === undefined ? String(value) : json;
+
+  if (text.length <= maxLength) {
+    return text;
+  }
+
+  return `${text.slice(0, maxLength)}...`;
+}
+
+function redactToken(text: string): string {
+  return text.replace(/"token"\s*:\s*"[^"]+"/g, '"token":"[redacted]"');
 }
 
 function readMessage(message: unknown): string {
