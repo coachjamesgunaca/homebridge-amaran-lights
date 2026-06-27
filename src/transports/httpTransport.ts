@@ -8,6 +8,7 @@ export class HttpTransport implements AmaranTransport {
   private readonly baseUrl: URL;
   private readonly token?: string;
   private readonly timeoutMs: number;
+  private readonly stateCache: Record<string, LightState> = {};
 
   constructor(
     config: HttpTransportConfig,
@@ -19,15 +20,74 @@ export class HttpTransport implements AmaranTransport {
   }
 
   async getState(id: string): Promise<LightState> {
-    return this.request('GET', id);
+    return this.stateCache[id] ?? {};
   }
 
   async setState(id: string, command: LightCommand): Promise<LightState> {
-    return this.request('POST', id, command);
+    const previous = this.stateCache[id] ?? {};
+    const next: LightState = { ...previous };
+
+    const endpoint = (action: string): string =>
+      `lights/${encodeURIComponent(id)}/${action}`;
+
+    if (command.on !== undefined) {
+      await this.request('POST', endpoint(command.on ? 'on' : 'off'));
+      next.on = command.on;
+    }
+
+    if (
+      command.brightness !== undefined &&
+      command.colorTemperatureKelvin === undefined &&
+      command.hue === undefined &&
+      command.saturation === undefined
+    ) {
+      await this.request('POST', endpoint('brightness'), {
+        value: command.brightness,
+      });
+      next.brightness = command.brightness;
+    }
+
+    if (command.colorTemperatureKelvin !== undefined) {
+      const brightness = command.brightness ?? next.brightness ?? 100;
+
+      await this.request('POST', endpoint('cct'), {
+        brightness,
+        kelvin: command.colorTemperatureKelvin,
+        gm: 0,
+      });
+
+      next.brightness = brightness;
+      next.colorTemperatureKelvin = command.colorTemperatureKelvin;
+    }
+
+    if (command.hue !== undefined || command.saturation !== undefined) {
+      const brightness = command.brightness ?? next.brightness ?? 100;
+      const hue = command.hue ?? next.hue ?? 0;
+      const saturation = command.saturation ?? next.saturation ?? 0;
+
+      await this.request('POST', endpoint('hsi'), {
+        brightness,
+        hue,
+        saturation,
+      });
+
+      next.brightness = brightness;
+      next.hue = hue;
+      next.saturation = saturation;
+    }
+
+    this.stateCache[id] = next;
+
+    return next;
   }
 
-  private async request(method: 'GET' | 'POST', id: string, body?: LightCommand): Promise<LightState> {
-    const url = new URL(`lights/${encodeURIComponent(id)}`, ensureTrailingSlash(this.baseUrl));
+  private async request(
+    method: 'GET' | 'POST',
+    path: string,
+    body?: Record<string, unknown>,
+  ): Promise<unknown> {
+    const url = new URL(path, ensureTrailingSlash(this.baseUrl));
+
     const headers: Record<string, string> = {
       Accept: 'application/json',
     };
@@ -50,15 +110,25 @@ export class HttpTransport implements AmaranTransport {
         signal: AbortSignal.timeout(this.timeoutMs),
       });
     } catch (error) {
-      this.log.debug('HTTP transport request failed for %s: %s', id, error instanceof Error ? error.message : String(error));
+      this.log.debug(
+        'HTTP transport request failed for %s: %s',
+        path,
+        error instanceof Error ? error.message : String(error),
+      );
       throw error;
     }
 
     if (!response.ok) {
-      throw new Error(`amaran bridge responded ${response.status} ${response.statusText}`);
+      throw new Error(`amaran BLE daemon responded ${response.status} ${response.statusText}`);
     }
 
-    return await response.json() as LightState;
+    const text = await response.text();
+
+    if (!text) {
+      return {};
+    }
+
+    return JSON.parse(text);
   }
 }
 
