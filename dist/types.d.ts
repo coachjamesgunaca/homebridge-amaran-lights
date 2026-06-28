@@ -34,10 +34,17 @@ export interface MockTransportConfig {
     readonly type: 'mock';
 }
 export type TransportConfig = AmaranDesktopTransportConfig | HttpTransportConfig | MockTransportConfig;
+export interface HttpControlServerConfig {
+    readonly enabled?: boolean;
+    readonly port?: number;
+    readonly host?: string;
+    readonly token?: string;
+}
 export interface AmaranPlatformConfig {
     readonly platform: string;
     readonly name?: string;
     readonly transport?: TransportConfig;
+    readonly http?: HttpControlServerConfig;
     readonly lights?: readonly LightConfig[];
 }
 export interface LightState {

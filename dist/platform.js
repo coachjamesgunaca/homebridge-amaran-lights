@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AmaranLightsPlatform = void 0;
 const platformAccessory_1 = require("./platformAccessory");
+const httpControlServer_1 = require("./httpControlServer");
 const models_1 = require("./models");
 const settings_1 = require("./settings");
 const transports_1 = require("./transports");
@@ -9,6 +10,8 @@ class AmaranLightsPlatform {
     log;
     api;
     accessories = new Map();
+    lightHandlers = new Map();
+    controlServer;
     config;
     transport;
     constructor(log, config, api) {
@@ -18,6 +21,9 @@ class AmaranLightsPlatform {
         this.transport = (0, transports_1.createTransport)(this.config.transport, this.log);
         this.api.on('didFinishLaunching', () => {
             this.discoverDevices();
+        });
+        this.api.on('shutdown', () => {
+            this.controlServer?.stop();
         });
     }
     configureAccessory(accessory) {
@@ -39,12 +45,12 @@ class AmaranLightsPlatform {
             if (existingAccessory) {
                 existingAccessory.context.device = lightConfig;
                 this.api.updatePlatformAccessories([existingAccessory]);
-                new platformAccessory_1.AmaranLightAccessory(this, existingAccessory, lightConfig, this.transport);
+                this.lightHandlers.set(lightConfig.id, new platformAccessory_1.AmaranLightAccessory(this, existingAccessory, lightConfig, this.transport));
                 continue;
             }
             const accessory = new this.api.platformAccessory(lightConfig.name, uuid);
             accessory.context.device = lightConfig;
-            new platformAccessory_1.AmaranLightAccessory(this, accessory, lightConfig, this.transport);
+            this.lightHandlers.set(lightConfig.id, new platformAccessory_1.AmaranLightAccessory(this, accessory, lightConfig, this.transport));
             this.api.registerPlatformAccessories(settings_1.PLUGIN_NAME, settings_1.PLATFORM_NAME, [accessory]);
         }
         const staleAccessories = [...this.accessories.values()].filter((accessory) => !configuredUuids.has(accessory.UUID));
@@ -54,6 +60,19 @@ class AmaranLightsPlatform {
                 this.accessories.delete(staleAccessory.UUID);
             }
         }
+        this.startControlServer();
+    }
+    startControlServer() {
+        const httpConfig = this.config.http;
+        if (httpConfig?.enabled === false) {
+            this.log.info('amaran HTTP control server disabled (http.enabled = false).');
+            return;
+        }
+        if (this.lightHandlers.size === 0) {
+            return;
+        }
+        this.controlServer = new httpControlServer_1.HttpControlServer(httpConfig ?? {}, this.lightHandlers, this.log);
+        this.controlServer.start();
     }
     isValidLightConfig(lightConfig) {
         if (!lightConfig.id || !lightConfig.name || !lightConfig.model) {

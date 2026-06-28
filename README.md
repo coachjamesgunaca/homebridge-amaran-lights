@@ -166,3 +166,42 @@ All values are normalized for HomeKit:
 - amaran Ray 120c product page: https://amarancreators.com/pages/amaran-ray-120c
 - amaran Verge Max product page: https://amarancreators.com/pages/amaran-verge-max
 - amaran app download page: https://amarancreators.com/pages/amaran-app-download
+
+## HTTP control server (Stream Deck ↔ HomeKit sync)
+
+The plugin can expose a small HTTP server so external controllers — notably the
+[amaran Stream Deck plugin](https://github.com/coachjamesgunaca/amaran-streamdeck) —
+drive the lights **through Homebridge** instead of hitting the amaran daemon
+directly. Every command is forwarded to the same transport HomeKit uses and then
+mirrored into HomeKit, so the Home app stays in sync (the way the Neewer setup
+behaves). Without this, a Stream Deck talking straight to the daemon would change
+the light but leave HomeKit stale.
+
+It is enabled by default on `127.0.0.1:2709`. Configure or disable it:
+
+```json
+{
+  "platform": "AmaranLightsPlatform",
+  "transport": { "type": "http", "baseUrl": "http://127.0.0.1:2708/" },
+  "http": { "enabled": true, "port": 2709, "host": "127.0.0.1" },
+  "lights": [ { "id": "key", "name": "Key Light", "model": "ray-120c" } ]
+}
+```
+
+Note the two ports: `transport.baseUrl` (2708) is the amaran daemon this plugin
+sends to; `http.port` (2709) is this plugin's own control server that the Stream
+Deck plugin points at. Point the Stream Deck plugin's **Server** field at
+`http://127.0.0.1:2709`.
+
+Routes (light `id` must equal the daemon key):
+
+| Method | Path | Body |
+| --- | --- | --- |
+| GET | `/lights` | — |
+| POST | `/lights/on` · `/lights/off` | — |
+| POST | `/lights/:id/on` · `/off` | — |
+| POST | `/lights/:id/brightness` | `{ "value": 0-100 }` |
+| POST | `/lights/:id/cct` | `{ "brightness": 0-100, "kelvin": <K>, "gm": 0 }` |
+| POST | `/lights/:id/hsi` | `{ "brightness": 0-100, "hue": 0-360, "saturation": 0-100 }` |
+
+Set `http.token` to require an `Authorization: Bearer <token>` header.

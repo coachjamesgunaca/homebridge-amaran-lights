@@ -6,6 +6,7 @@ export declare class HttpTransport implements AmaranTransport {
     private readonly baseUrl;
     private readonly token?;
     private readonly timeoutMs;
+    private readonly stateCache;
     constructor(config: HttpTransportConfig, log: Logger);
     getState(id: string): Promise<LightState>;
     setState(id: string, command: LightCommand): Promise<LightState>;

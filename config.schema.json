@@ -188,6 +188,33 @@
             "model": "verge-max"
           }
         ]
+      },
+      "http": {
+        "title": "HTTP Control Server (Stream Deck \u2194 HomeKit sync)",
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean",
+            "default": true
+          },
+          "port": {
+            "title": "Port",
+            "type": "integer",
+            "default": 2709,
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "host": {
+            "title": "Host",
+            "type": "string",
+            "default": "127.0.0.1"
+          },
+          "token": {
+            "title": "Bearer Token",
+            "type": "string"
+          }
+        }
       }
     },
     "required": [

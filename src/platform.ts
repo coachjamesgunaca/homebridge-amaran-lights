@@ -7,6 +7,7 @@ import type {
 } from 'homebridge';
 
 import { AmaranLightAccessory } from './platformAccessory';
+import { HttpControlServer } from './httpControlServer';
 import { getCapabilities } from './models';
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings';
 import { createTransport } from './transports';
@@ -14,6 +15,8 @@ import type { AmaranPlatformConfig, LightConfig } from './types';
 
 export class AmaranLightsPlatform implements DynamicPlatformPlugin {
   private readonly accessories = new Map<string, PlatformAccessory>();
+  private readonly lightHandlers = new Map<string, AmaranLightAccessory>();
+  private controlServer?: HttpControlServer;
   private readonly config: AmaranPlatformConfig;
   private readonly transport;
 
@@ -27,6 +30,10 @@ export class AmaranLightsPlatform implements DynamicPlatformPlugin {
 
     this.api.on('didFinishLaunching', () => {
       this.discoverDevices();
+    });
+
+    this.api.on('shutdown', () => {
+      this.controlServer?.stop();
     });
   }
 
@@ -55,13 +62,13 @@ export class AmaranLightsPlatform implements DynamicPlatformPlugin {
       if (existingAccessory) {
         existingAccessory.context.device = lightConfig;
         this.api.updatePlatformAccessories([existingAccessory]);
-        new AmaranLightAccessory(this, existingAccessory, lightConfig, this.transport);
+        this.lightHandlers.set(lightConfig.id, new AmaranLightAccessory(this, existingAccessory, lightConfig, this.transport));
         continue;
       }
 
       const accessory = new this.api.platformAccessory(lightConfig.name, uuid);
       accessory.context.device = lightConfig;
-      new AmaranLightAccessory(this, accessory, lightConfig, this.transport);
+      this.lightHandlers.set(lightConfig.id, new AmaranLightAccessory(this, accessory, lightConfig, this.transport));
       this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
     }
 
@@ -73,6 +80,21 @@ export class AmaranLightsPlatform implements DynamicPlatformPlugin {
         this.accessories.delete(staleAccessory.UUID);
       }
     }
+
+    this.startControlServer();
+  }
+
+  private startControlServer(): void {
+    const httpConfig = this.config.http;
+    if (httpConfig?.enabled === false) {
+      this.log.info('amaran HTTP control server disabled (http.enabled = false).');
+      return;
+    }
+    if (this.lightHandlers.size === 0) {
+      return;
+    }
+    this.controlServer = new HttpControlServer(httpConfig ?? {}, this.lightHandlers, this.log);
+    this.controlServer.start();
   }
 
   private isValidLightConfig(lightConfig: LightConfig): boolean {

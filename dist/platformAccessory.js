@@ -105,6 +105,36 @@ class AmaranLightAccessory {
     setSaturation(value, callback) {
         void this.applyState({ saturation: (0, models_1.clamp)(Number(value), 0, 100) }, callback);
     }
+    /** Light id (must equal the daemon key used by the http transport). */
+    get id() {
+        return this.config.id;
+    }
+    /** Human-friendly name for listings. */
+    get displayName() {
+        return this.config.name;
+    }
+    /**
+     * Apply a command that originated outside HomeKit (e.g. the Stream Deck
+     * plugin via the HTTP control server). Forwards to the transport exactly like
+     * a HomeKit-initiated change, then pushes the result into HomeKit so the tile
+     * stays in sync. Brightness/CCT/HSI implicitly turn the fixture on (the daemon
+     * does this), which we reflect without an extra round-trip.
+     */
+    async applyExternalCommand(command) {
+        const state = await this.transport.setState(this.config.id, command);
+        this.updateState(state);
+        if (command.on !== undefined) {
+            this.state = { ...this.state, on: command.on };
+        }
+        else if (command.brightness !== undefined ||
+            command.colorTemperatureKelvin !== undefined ||
+            command.hue !== undefined ||
+            command.saturation !== undefined) {
+            this.state = { ...this.state, on: true };
+        }
+        this.updateHomeKitCharacteristics();
+        return this.state;
+    }
     async refreshState() {
         try {
             const state = await this.transport.getState(this.config.id);

@@ -4,6 +4,8 @@ import type { HttpTransportConfig, LightCommand, LightState } from '../types';
 
 import type { AmaranTransport } from './transport';
 
+type MutableLightState = { -readonly [Key in keyof LightState]: LightState[Key] };
+
 export class HttpTransport implements AmaranTransport {
   private readonly baseUrl: URL;
   private readonly token?: string;
@@ -25,7 +27,7 @@ export class HttpTransport implements AmaranTransport {
 
   async setState(id: string, command: LightCommand): Promise<LightState> {
     const previous = this.stateCache[id] ?? {};
-    const next: LightState = { ...previous };
+    const next: MutableLightState = { ...previous };
 
     const endpoint = (action: string): string =>
       `lights/${encodeURIComponent(id)}/${action}`;
